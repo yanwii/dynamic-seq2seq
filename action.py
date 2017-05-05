@@ -56,7 +56,7 @@ class Action():
         outstrs = []
         action = False
         
-        itchat.sent("您需要我叫您什么？", "filehelper")
+        print("ai > 您需要我叫您什么呢")
         inputs_strs = input("me > ")
         self.user_info["__username__"] = inputs_strs
         outstrs.append("好的以后就叫您%s了" % (inputs_strs))
