@@ -1,6 +1,9 @@
 # dynamic-seq2seq
 ### 基于中文语料和dynamic_rnn的seq2seq模型
-**需要 python3+ tensorflow-1.0+**  
+**需要 python3+ tensorflow-1.0**  
+**由于tensorflow升级 本教程只适合tesorflow-1.0版本**  
+   
+
 谷歌最近开源了一个seq2seq项目 [google seq2seq](https://github.com/google/seq2seq)  
 这个项目加入了beam search，但是非官方的项目，并且该项目是直接从文件里面读数据，所以需要修改代码。  
 tensorflow推出了dynamic_rnn替代了原来的bucket，本项目就是基于dynamic_rnn的seq2seq模型。  
