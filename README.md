@@ -9,7 +9,9 @@
 tensorflow推出了dynamic_rnn替代了原来的bucket，本项目就是基于dynamic_rnn的seq2seq模型。  
   
 这里我构建了一些对话预料，中文语料本身就比较稀缺，理论上来说语料越多模型的效果越好，但会遇到很多新的问题，这里就不多作说明。   
-我在模型中加入了**Action**，可以实现简单的功能，算是Demo吧。  
+~~我在模型中加入了**Action**，可以实现简单的功能，算是Demo吧。~~
+删除Action 交给你们自己去实现吧
+
 
 对话语料分别在根目录下 question.txt answer.txt中，可以替换成你自己的对话语料。    
 然后使用preprocessing.py自动化预处理。
