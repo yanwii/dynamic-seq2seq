@@ -8,11 +8,9 @@ import tensorflow as tf
 from tensorflow.contrib.rnn import LSTMCell, GRUCell
 from dynamic_seq2seq_model import dynamicSeq2seq
 import jieba
-from action import Action
 from flask import Flask,request,jsonify
-from chatAction import chatAction
 
-class seq2seq(Action):
+class seq2seq():
     '''
     tensorflow-1.0.0
 
@@ -45,13 +43,13 @@ class seq2seq(Action):
         # jieba导入词典
         jieba.load_userdict(self.dictFile)
 
-        self.model = dynamicSeq2seq(encoder_cell=LSTMCell(20),
+        self.model = dynamicSeq2seq(encoder_cell=LSTMCell(40),
                                     decoder_cell=LSTMCell(40), 
-                                    encoder_vocab_size=540,
+                                    encoder_vocab_size=600,
                                     decoder_vocab_size=1600,
                                     embedding_size=20,
-                                    attention=True,
-                                    bidirectional=True,
+                                    attention=False,
+                                    bidirectional=False,
                                     debug=False,
                                     time_major=True)
         self.location = ["杭州", "重庆", "上海", "北京"]
@@ -59,13 +57,15 @@ class seq2seq(Action):
         self.robot_info = {"__robotname__":"Rr"}
         self.dec_vocab = {}
         self.enc_vocab = {}
+        self.dec_vecToSeg = {}
         tag_location = ''
         with open(self.encoder_vocabulary, "r") as enc_vocab_file:
             for index, word in enumerate(enc_vocab_file.readlines()):
                 self.enc_vocab[word.strip()] = index
         with open(self.decoder_vocabulary, "r") as dec_vocab_file:
             for index, word in enumerate(dec_vocab_file.readlines()):
-                self.dec_vocab[index] = word.strip()
+                self.dec_vecToSeg[index] = word.strip()
+                self.dec_vocab[word.strip()] = index
         
 
     def data_set(self, file):
@@ -187,6 +187,75 @@ class seq2seq(Action):
                         print('    dec predict > {}'.format(dt_pred))
                         if i >= 0:
                             break
+    
+    def addToFile(self, strs, file):
+        with open(file, "a") as f:
+            f.write(strs+"\n")
+        
+    def addVocab(self, word, kind):
+        if kind == 'enc':
+            self.addToFile(word, self.encoder_vocabulary)
+            index = max(self.enc_vocab.values())+1
+            self.enc_vocab[word] = index
+        else:
+            self.addToFile(word, self.decoder_vocabulary)
+            index = max(self.dec_vocab.values())+1
+            self.dec_vocab[word] = index
+            self.dec_vecToSeg[index] = word
+        return index
+
+    def onlinelearning(self, input_strs, target_strs):
+        input_seg = jieba.lcut(input_strs)
+        target_seg = jieba.lcut(target_strs)
+
+        input_vec = []
+        for word in input_seg:
+            if word not in self.enc_vocab.keys():
+                vec = self.addVocab(word, "enc")
+            else:
+                vec = self.enc_vocab.get(word)
+            input_vec.append(vec)
+
+        target_vec = []
+        for word in target_seg:
+            if word not in self.dec_vocab.keys():
+                vec = self.addVocab(word, "dec")
+            else:
+                vec = self.dec_vocab.get(word)
+            target_vec.append(vec)
+
+        with tf.Session() as sess:
+            # 初始化变量
+            ckpt = tf.train.get_checkpoint_state(self.model_path)
+            if ckpt is not None:
+                print(ckpt.model_checkpoint_path)
+                self.model.saver.restore(sess, ckpt.model_checkpoint_path)
+            else:
+                sess.run(tf.global_variables_initializer())
+            
+            fd = self.get_fd([input_vec],
+                             [target_vec],
+                             1,
+                             1)
+            for i in range(100):
+                _, loss,_,_ = sess.run([self.model.train_op, 
+                                        self.model.loss,
+                                        self.model.gradient_norms,
+                                        self.model.updates], fd)
+                checkpoint_path = self.model_path+"chatbot_seq2seq.ckpt"
+                # 保存模型
+                self.model.saver.save(sess, checkpoint_path, global_step=self.model.global_step)
+
+                for i, (e_in, dt_pred) in enumerate(zip(
+                            fd[self.model.decoder_targets].T,
+                            sess.run(self.model.decoder_prediction_train, fd).T
+                        )):
+                            print('  sample {}:'.format(i + 1))
+                            print('    dec targets > {}'.format(e_in))
+                            print('    dec predict > {}'.format(dt_pred))
+                            if i >= 0:
+                                break
+
     def segement(self, strs):
         return jieba.lcut(strs)
 
@@ -208,14 +277,6 @@ class seq2seq(Action):
                 self.model.encoder_inputs_length:sequence_lengths}
     
     def predict(self):
-        
-        # Action
-        Action.enc_vocab = self.enc_vocab
-        Action.dec_vocab = self.dec_vocab
-        Action.user_info = self.user_info
-        Action.location = self.location
-        Action.robot_info = self.robot_info
-
         with tf.Session() as sess:
             ckpt = tf.train.get_checkpoint_state(self.model_path)
             if ckpt is not None:
@@ -247,11 +308,15 @@ class seq2seq(Action):
                 fd = self.make_inference_fd([inputs_vec])
                 inf_out = sess.run(self.model.decoder_prediction_inference, fd)
                 inf_out = [i[0] for i in inf_out]
+
+                outstrs = ''
+                for vec in inf_out:
+                    if vec == self.model.EOS:
+                        break
+                    outstrs += self.dec_vecToSeg.get(vec, self.model.UNK)
+                print(outstrs)
                 
-                # 加入Atcion
-                outstrs, action, inputs_strs = Action.main(self, inf_out, inputs_strs)
-                if not action:
-                    print("RR > "+"".join(outstrs))
+
 
     def clearModel(self, remain=3):
         try:
@@ -325,4 +390,6 @@ if __name__ == '__main__':
             seq.predict()  
         elif sys.argv[1] == 'chat':
             print(seq.chat())
+        elif sys.argv[1] == 'online':
+            seq.onlinelearning("为什么会打雷下雨", "问海尔兄弟去")
             
