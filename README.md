@@ -1,8 +1,9 @@
 # dynamic-seq2seq
+## 欢迎关注我的另一个项目[基于Pytorch以及Beam Search算法的中文聊天机器人](https://github.com/yanwii/seq2seq)
 ### 基于中文语料和dynamic_rnn的seq2seq模型
+
 **需要 python3+ tensorflow-1.0**  
 **由于tensorflow升级 本教程只适合tesorflow-1.0版本**  
-   
 
 谷歌最近开源了一个seq2seq项目 [google seq2seq](https://github.com/google/seq2seq)  
 这个项目加入了beam search，但是非官方的项目，并且该项目是直接从文件里面读数据，所以需要修改代码。  
