@@ -6,7 +6,7 @@ import tensorflow.contrib.seq2seq as seq2seq
 from tensorflow.contrib.layers import safe_embedding_lookup_sparse as embedding_lookup_unique
 from tensorflow.contrib.rnn import LSTMCell, LSTMStateTuple, GRUCell
 
-class dynamicSeq2seq():
+class DynamicSeq2seq():
     '''
     Dynamic_Rnn_Seq2seq with Tensorflow-1.0.0  
 
@@ -31,19 +31,21 @@ class dynamicSeq2seq():
     PAD = 0
     EOS = 2
     UNK = 3
-    def __init__(self, encoder_cell, 
-                 decoder_cell, 
-                 encoder_vocab_size,
-                 decoder_vocab_size, 
-                 embedding_size,
-                 bidirectional=True,
-                 attention=False,
-                 debug=False,
-                 time_major=False):
+    def __init__(self, 
+                encoder_cell=tf.contrib.rnn.BasicLSTMCell(10), 
+                decoder_cell=tf.contrib.rnn.BasicLSTMCell(10), 
+                encoder_vocab_size=10,
+                decoder_vocab_size=5, 
+                embedding_size=10,
+                bidirectional=True,
+                attention=False,
+                debug=False,
+                time_major=False):
         
         self.debug = debug
         self.bidirectional = bidirectional
         self.attention = attention
+        self.lstm_dims = 10
 
         self.encoder_vocab_size = encoder_vocab_size
         self.decoder_vocab_size = decoder_vocab_size
@@ -69,23 +71,17 @@ class dynamicSeq2seq():
         # 创建占位符
         self._init_placeholders()
 
-        # 兼容decoder输出数据
-        self._init_decoder_train_connectors()
-        
         # embedding层
         self._init_embeddings()
 
         # 判断是否为双向LSTM并创建encoder
-        if self.bidirectional:
-            self._init_bidirectional_encoder()
-        else:
-            self._init_simple_encoder()
+        self._init_bidirectional_encoder()
 
         # 创建decoder，会判断是否使用attention模型
         self._init_decoder()
 
         # 计算loss及优化
-        self._init_optimizer()
+        #self._init_optimizer()
 
     def _init_placeholders(self):
         self.encoder_inputs = tf.placeholder(
@@ -93,11 +89,9 @@ class dynamicSeq2seq():
             dtype=tf.int32,
             name='encoder_inputs',
         )
-        #self.encoder_inputs = tf.Variable(np.ones((10, 50)).astype(np.int32))
         self.encoder_inputs_length = tf.placeholder(
             shape=(None,),
             dtype=tf.int32,
-            name='encoder_inputs_length',
         )
 
         self.decoder_targets = tf.placeholder(
@@ -108,39 +102,9 @@ class dynamicSeq2seq():
         self.decoder_targets_length = tf.placeholder(
             shape=(None,),
             dtype=tf.int32,
-            name='decoder_targets_length',
         )
 
-    def _init_decoder_train_connectors(self):
-        with tf.name_scope('DecoderTrainFeeds'):
-            sequence_size, batch_size = tf.unstack(tf.shape(self.decoder_targets))
-            #batch_size, sequence_size = tf.unstack(tf.shape(self.decoder_targets))
-
-
-            EOS_SLICE = tf.ones([1, batch_size], dtype=tf.int32) * self.EOS
-            PAD_SLICE = tf.ones([1, batch_size], dtype=tf.int32) * self.PAD
-
-            self.decoder_train_inputs = tf.concat([EOS_SLICE, self.decoder_targets], axis=0)
-            self.decoder_train_length = self.decoder_targets_length + 1
-            #self.decoder_train_length = self.decoder_targets_length
-
-            decoder_train_targets = tf.concat([self.decoder_targets, PAD_SLICE], axis=0)
-            decoder_train_targets_seq_len, _ = tf.unstack(tf.shape(decoder_train_targets))
-            decoder_train_targets_eos_mask = tf.one_hot(self.decoder_train_length - 1,
-                                                        decoder_train_targets_seq_len,
-                                                        on_value=self.EOS, off_value=self.PAD,
-                                                        dtype=tf.int32)
-            decoder_train_targets_eos_mask = tf.transpose(decoder_train_targets_eos_mask, [1, 0])
-
-            decoder_train_targets = tf.add(decoder_train_targets,
-                                           decoder_train_targets_eos_mask)
-
-            self.decoder_train_targets = decoder_train_targets
-
-            self.loss_weights = tf.ones([
-                batch_size,
-                tf.reduce_max(self.decoder_train_length)
-            ], dtype=tf.float32, name="loss_weights")
+        self.batch_size = tf.shape(self.encoder_inputs)[1]
 
     def _init_embeddings(self):
         with tf.variable_scope("embedding") as scope:
@@ -148,156 +112,78 @@ class dynamicSeq2seq():
             sqrt3 = math.sqrt(3)
             initializer = tf.random_uniform_initializer(-sqrt3, sqrt3)
 
-            self.encoder_embedding_matrix = tf.get_variable(
-                name="encoder_embedding_matrix",
-                shape=[self.encoder_vocab_size, self.embedding_size],
-                initializer=initializer,
-                dtype=tf.float32)
-            
-            self.decoder_embedding_matrix = tf.get_variable(
-                name="decoder_embedding_matrix",
-                shape=[self.decoder_vocab_size, self.embedding_size],
-                initializer=initializer,
-                dtype=tf.float32)
-
-            # encoder的embedd
-            self.encoder_inputs_embedded = tf.nn.embedding_lookup(
-                self.encoder_embedding_matrix, self.encoder_inputs)
-
-            # decoder的embedd
-            self.decoder_train_inputs_embedded = tf.nn.embedding_lookup(
-                self.decoder_embedding_matrix, self.decoder_train_inputs)
-
-    def _init_simple_encoder(self):
-        '''
-        一般的encdoer
-        '''
-        with tf.variable_scope("Encoder") as scope:
-            (self.encoder_outputs, self.encoder_state) = (
-                tf.nn.dynamic_rnn(cell=self.encoder_cell,
-                                  inputs=self.encoder_inputs_embedded,
-                                  sequence_length=self.encoder_inputs_length,
-                                  time_major=self.time_major,
-                                  dtype=tf.float32)
+            # encoder Embedding
+            embedding_encoder = tf.get_variable(
+                    "embedding_encoder", 
+                    shape=[self.encoder_vocab_size, self.embedding_size],
+                    initializer=initializer,
+                    dtype=tf.float32
+                )
+            self.encoder_emb_inp = tf.nn.embedding_lookup(
+                    embedding_encoder, self.encoder_inputs
                 )
 
+            #  decoder Embedding
+            embedding_decoder = tf.get_variable(
+                    "embedding_decoder", 
+                    shape=[self.decoder_vocab_size, self.embedding_size],
+                    initializer=initializer,
+                    dtype=tf.float32
+                )
+            self.decoder_emb_inp = tf.nn.embedding_lookup(
+                    embedding_decoder, self.decoder_targets
+                )
+            
     def _init_bidirectional_encoder(self):
         '''
         双向LSTM encoder
         '''
-        with tf.variable_scope("BidirectionalEncoder") as scope:
-            ((encoder_fw_outputs,
-              encoder_bw_outputs),
-             (encoder_fw_state,
-              encoder_bw_state)) = (
-                tf.nn.bidirectional_dynamic_rnn(cell_fw=self.encoder_cell,
-                                                cell_bw=self.encoder_cell,
-                                                inputs=self.encoder_inputs_embedded,
-                                                sequence_length=self.encoder_inputs_length,
-                                                time_major=self.time_major,
-                                                dtype=tf.float32)
-                )
+        # Build RNN cell
+        encoder_cell = tf.nn.rnn_cell.BasicLSTMCell(self.lstm_dims)
 
-            self.encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
-
-            if isinstance(encoder_fw_state, LSTMStateTuple):
-
-                encoder_state_c = tf.concat(
-                    (encoder_fw_state.c, encoder_bw_state.c), 1, name='bidirectional_concat_c')
-                encoder_state_h = tf.concat(
-                    (encoder_fw_state.h, encoder_bw_state.h), 1, name='bidirectional_concat_h')
-                self.encoder_state = LSTMStateTuple(c=encoder_state_c, h=encoder_state_h)
-
-            elif isinstance(encoder_fw_state, tf.Tensor):
-                self.encoder_state = tf.concat((encoder_fw_state, encoder_bw_state), 1, name='bidirectional_concat')
+        encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
+            encoder_cell, self.encoder_emb_inp,
+            sequence_length=self.encoder_inputs_length, time_major=True,
+            dtype=tf.float32
+        )
+        self.encoder_output = encoder_outputs
+        self.encoder_state = encoder_state
 
     def _init_decoder(self):
-        with tf.variable_scope("Decoder") as scope:
-            def output_fn(outputs):
-                self.test_outputs = outputs
-                return tf.contrib.layers.linear(outputs, self.decoder_vocab_size, scope=scope)
+        attention_states = tf.transpose(self.encoder_output, [1, 0, 2])
 
-            if not self.attention:
-                decoder_fn_train = seq2seq.simple_decoder_fn_train(encoder_state=self.encoder_state)
-                decoder_fn_inference = seq2seq.simple_decoder_fn_inference(
-                    output_fn=output_fn,
-                    encoder_state=self.encoder_state,
-                    embeddings=self.decoder_embedding_matrix,
-                    start_of_sequence_id=self.EOS,
-                    end_of_sequence_id=self.EOS,
-                    maximum_length=tf.reduce_max(self.encoder_inputs_length) + 100,
-                    num_decoder_symbols=self.decoder_vocab_size,
-                )
-            else:
+        attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+            num_units=self.lstm_dims, 
+            memory=attention_states,
+            memory_sequence_length=self.decoder_targets_length
+        )
 
-                # attention_states: size [batch_size, max_time, num_units]
-                attention_states = tf.transpose(self.encoder_outputs, [1, 0, 2])
-
-                (attention_keys,
-                attention_values,
-                attention_score_fn,
-                attention_construct_fn) = seq2seq.prepare_attention(
-                    attention_states=attention_states,
-                    attention_option="bahdanau",
-                    num_units=self.decoder_hidden_units,
-                )
-
-                decoder_fn_train = seq2seq.attention_decoder_fn_train(
-                    encoder_state=self.encoder_state,
-                    attention_keys=attention_keys,
-                    attention_values=attention_values,
-                    attention_score_fn=attention_score_fn,
-                    attention_construct_fn=attention_construct_fn,
-                    name='attention_decoder'
-                )
-
-                decoder_fn_inference = seq2seq.attention_decoder_fn_inference(
-                    output_fn=output_fn,
-                    encoder_state=self.encoder_state,
-                    attention_keys=attention_keys,
-                    attention_values=attention_values,
-                    attention_score_fn=attention_score_fn,
-                    attention_construct_fn=attention_construct_fn,
-                    embeddings=self.decoder_embedding_matrix,
-                    start_of_sequence_id=self.EOS,
-                    end_of_sequence_id=self.EOS,
-                    maximum_length=tf.reduce_max(self.encoder_inputs_length) + 100,
-                    num_decoder_symbols=self.decoder_vocab_size,
-                )
-
-            (self.decoder_outputs_train,
-             self.decoder_state_train,
-             self.decoder_context_state_train) = (
-                seq2seq.dynamic_rnn_decoder(
-                    cell=self.decoder_cell,
-                    decoder_fn=decoder_fn_train,
-                    inputs=self.decoder_train_inputs_embedded,
-                    sequence_length=self.decoder_train_length,
-                    time_major=self.time_major,
-                    scope=scope,
-                )
-            )
-
-            self.decoder_logits_train = output_fn(self.decoder_outputs_train)
-            self.decoder_prediction_train = tf.argmax(self.decoder_logits_train, axis=-1, name='decoder_prediction_train')
-
-            scope.reuse_variables()
-
-            (self.decoder_logits_inference,
-             self.decoder_state_inference,
-             self.decoder_context_state_inference) = (
-                seq2seq.dynamic_rnn_decoder(
-                    cell=self.decoder_cell,
-                    decoder_fn=decoder_fn_inference,
-                    time_major=self.time_major,
-                    scope=scope,
-                )
-            )
-            self.decoder_prediction_inference = tf.argmax(self.decoder_logits_inference, axis=-1, name='decoder_prediction_inference')
-    
-    def _init_MMI(self, logits, targets):
-        sum_mmi = 0
-        x_value_list = 1
+        decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
+            self.decoder_cell, attention_mechanism,
+            attention_layer_size=self.lstm_dims
+        )
+        # Helper    
+        helper = tf.contrib.seq2seq.TrainingHelper(
+            self.decoder_emb_inp, 
+            self.decoder_targets_length, 
+            time_major=True
+        )
+        projection_layer = tf.layers.Dense(self.decoder_vocab_size, use_bias=False)
+        init_state = decoder_cell.zero_state(self.batch_size, tf.float32).clone(cell_state=self.encoder_state)
+        # Decoder
+        decoder = tf.contrib.seq2seq.BasicDecoder(
+            cell=decoder_cell,
+            helper=helper,
+            initial_state=init_state,
+            output_layer=projection_layer
+        )
+        maximum_iterations = tf.round(tf.reduce_max(self.decoder_targets_length) * 2)
+        # Dynamic decoding
+        outputs = tf.contrib.seq2seq.dynamic_decode(
+            decoder, 
+            maximum_iterations=maximum_iterations
+        )
+        self.logits = outputs
 
     def _init_optimizer(self):
         # 整理输出并计算loss
@@ -325,4 +211,19 @@ class dynamicSeq2seq():
             zip(clipped_gradients, params), global_step=self.global_step))
 
         self.saver = tf.train.Saver(tf.global_variables())
-        
+
+    def run(self):
+        feed = {
+            self.encoder_inputs:[[2],[1],[2],[3],[4]],
+            self.encoder_inputs_length:[5],
+            self.decoder_targets:[[1],[0],[4],[3],[2]],
+            self.decoder_targets_length:[5]
+        }
+
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            logits = sess.run([self.logits], feed_dict=feed)
+            print logits[0][0]
+
+model = DynamicSeq2seq()
+model.run()
