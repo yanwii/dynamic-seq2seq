@@ -1,0 +1,2 @@
+model_checkpoint_path: "chatbot_seq2seq.ckpt--1"
+all_model_checkpoint_paths: "chatbot_seq2seq.ckpt--1"

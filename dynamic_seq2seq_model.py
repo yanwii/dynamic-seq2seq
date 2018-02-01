@@ -37,13 +37,11 @@ class DynamicSeq2seq():
                 encoder_vocab_size=10,
                 decoder_vocab_size=5, 
                 embedding_size=10,
-                bidirectional=True,
                 attention=False,
                 debug=False,
                 time_major=False):
         
         self.debug = debug
-        self.bidirectional = bidirectional
         self.attention = attention
         self.lstm_dims = 10
 
@@ -57,16 +55,10 @@ class DynamicSeq2seq():
         
         self.global_step = tf.Variable(-1, trainable=False)
         self.max_gradient_norm = 5
-        self.time_major = time_major
 
         #创建模型
         self._make_graph()
 
-    @property
-    def decoder_hidden_units(self):
-        # @TODO: is this correct for LSTMStateTuple?
-        return self.decoder_cell.output_size
-    
     def _make_graph(self):
         # 创建占位符
         self._init_placeholders()
@@ -81,7 +73,7 @@ class DynamicSeq2seq():
         self._init_decoder()
 
         # 计算loss及优化
-        #self._init_optimizer()
+        self._init_optimizer()
 
     def _init_placeholders(self):
         self.encoder_inputs = tf.placeholder(
@@ -89,20 +81,19 @@ class DynamicSeq2seq():
             dtype=tf.int32,
             name='encoder_inputs',
         )
-        self.encoder_inputs_length = tf.placeholder(
-            shape=(None,),
-            dtype=tf.int32,
-        )
-
         self.decoder_targets = tf.placeholder(
             shape=(None, None),
             dtype=tf.int32,
             name='decoder_targets'
         )
-        self.decoder_targets_length = tf.placeholder(
-            shape=(None,),
-            dtype=tf.int32,
-        )
+
+        used = tf.sign(tf.abs(self.encoder_inputs))
+        length = tf.reduce_sum(used, reduction_indices=0)
+        self.encoder_inputs_length = tf.cast(length, tf.int32)
+
+        used = tf.sign(tf.abs(self.decoder_targets))
+        length = tf.reduce_sum(used, reduction_indices=0)
+        self.decoder_targets_length = tf.cast(length, tf.int32)
 
         self.batch_size = tf.shape(self.encoder_inputs)[1]
 
@@ -122,7 +113,6 @@ class DynamicSeq2seq():
             self.encoder_emb_inp = tf.nn.embedding_lookup(
                     embedding_encoder, self.encoder_inputs
                 )
-
             #  decoder Embedding
             embedding_decoder = tf.get_variable(
                     "embedding_decoder", 
@@ -130,6 +120,7 @@ class DynamicSeq2seq():
                     initializer=initializer,
                     dtype=tf.float32
                 )
+            self.embedding_decoder = embedding_decoder
             self.decoder_emb_inp = tf.nn.embedding_lookup(
                     embedding_decoder, self.decoder_targets
                 )
@@ -155,7 +146,6 @@ class DynamicSeq2seq():
         attention_mechanism = tf.contrib.seq2seq.LuongAttention(
             num_units=self.lstm_dims, 
             memory=attention_states,
-            memory_sequence_length=self.decoder_targets_length
         )
 
         decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
@@ -177,7 +167,7 @@ class DynamicSeq2seq():
             initial_state=init_state,
             output_layer=projection_layer
         )
-        maximum_iterations = tf.round(tf.reduce_max(self.decoder_targets_length) * 2)
+        maximum_iterations = tf.round(tf.reduce_max(self.encoder_inputs_length) * 10)
         # Dynamic decoding
         outputs = tf.contrib.seq2seq.dynamic_decode(
             decoder, 
@@ -185,45 +175,49 @@ class DynamicSeq2seq():
         )
         self.logits = outputs
 
+        # ------------Infer-----------------
+        # Helper
+        infer_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+            self.embedding_decoder,
+            tf.fill([self.batch_size], 1), 2)
+    
+        # Decoder
+        decoder = tf.contrib.seq2seq.BasicDecoder(
+            cell=decoder_cell,
+            helper=infer_helper,
+            initial_state=init_state,
+            output_layer=projection_layer
+            )
+        # Dynamic decoding
+        infer_outputs = tf.contrib.seq2seq.dynamic_decode(
+            decoder, maximum_iterations=maximum_iterations)
+        self.translations = infer_outputs
+        
+
     def _init_optimizer(self):
         # 整理输出并计算loss
-        logits = tf.transpose(self.decoder_logits_train, [1, 0, 2])
-        targets = tf.transpose(self.decoder_train_targets, [1, 0])
-        self.logits = tf.transpose(self.decoder_logits_train, [1, 0, 2])
-        self.targets = tf.transpose(self.decoder_train_targets, [1, 0])
-    
-        self.loss = seq2seq.sequence_loss(logits=logits, targets=targets,
-                                          weights=self.loss_weights)
-        
-        opt = tf.train.AdamOptimizer()
-        self.train_op = opt.minimize(self.loss)
-
-        # add
+        crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[0][0],
+                        labels=self.decoder_targets)
+        train_loss = tf.reduce_sum(crossent)
+        self.loss = train_loss
+        # Calculate and clip gradients
         params = tf.trainable_variables()
-        self.gradient_norms = []
-        self.updates = []
+        gradients = tf.gradients(train_loss, params)
+        clipped_gradients, _ = tf.clip_by_global_norm(
+                        gradients, self.max_gradient_norm)
 
-        gradients = tf.gradients(self.loss, params)
-        clipped_gradients, norm = tf.clip_by_global_norm(gradients,
-                                                         self.max_gradient_norm)
-        self.gradient_norms.append(norm)
-        self.updates.append(opt.apply_gradients(
-            zip(clipped_gradients, params), global_step=self.global_step))
-
+        # Optimization
+        optimizer = tf.train.AdamOptimizer(0.1)
+        update_step = optimizer.apply_gradients(zip(clipped_gradients, params))
+        self.train_op = update_step
         self.saver = tf.train.Saver(tf.global_variables())
 
     def run(self):
         feed = {
-            self.encoder_inputs:[[2],[1],[2],[3],[4]],
-            self.encoder_inputs_length:[5],
-            self.decoder_targets:[[1],[0],[4],[3],[2]],
-            self.decoder_targets_length:[5]
+            self.encoder_inputs:[[2,1],[1,2],[2,3],[3,4],[4,5]],
+            self.decoder_targets:[[1,1],[1,1],[4,1],[3,1],[2,0]],
         }
-
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
-            logits = sess.run([self.logits], feed_dict=feed)
-            print logits[0][0]
-
-model = DynamicSeq2seq()
-model.run()
+            for i in range(10000):
+                logits,_,loss = sess.run([self.logits, self.train_op, self.loss], feed_dict=feed)
