@@ -193,7 +193,7 @@ class DynamicSeq2seq():
         # Dynamic decoding
         infer_outputs = tf.contrib.seq2seq.dynamic_decode(
             decoder, maximum_iterations=maximum_iterations)
-        self.translations = infer_outputs
+        self.translations = infer_outputs[0][1]
         
 
     def _init_optimizer(self):

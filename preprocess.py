@@ -13,7 +13,6 @@ class Preprocess():
     def __init__(self):
         self.save_dir = "data"
         self.dialog_dir = "dialog"
-
         self.Q_vocab = self.vocab.copy()
         self.A_vocab = self.vocab.copy()
         self.Q_vec = []
@@ -67,3 +66,8 @@ class Preprocess():
             if dtype == "A":
                 t_vec.append(2)
             vec.append(t_vec)
+
+        # save vocab 
+        with open(os.path.join(self.save_dir, dtype+"_vocab"), "w") as f:
+            for k,v in vocab.items():
+                f.write("{},{}\n".format(k.encode("utf-8"),v))
