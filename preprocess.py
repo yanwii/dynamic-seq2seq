@@ -58,7 +58,7 @@ class Preprocess():
         max_index = max(vocab.values())
         for sent in sentences:
             segments = jieba.lcut(sent)
-            t_vec = [1]
+            t_vec = []
             for seg in segments:
                 if seg not in vocab:
                     vocab[seg] = max_index + 1

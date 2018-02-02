@@ -56,6 +56,7 @@ class seq2seq():
         '''
         encoder_inputs = batch[0]
         decoder_targets = batch[1]
+
         feed_dict = {
             model.encoder_inputs:encoder_inputs,
             model.decoder_targets:decoder_targets

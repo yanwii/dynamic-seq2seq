@@ -86,6 +86,9 @@ class DynamicSeq2seq():
             dtype=tf.int32,
             name='decoder_targets'
         )
+        self.batch_size = tf.shape(self.encoder_inputs)[1]
+        self.decoder_inputs = tf.concat([tf.ones(shape=[1, self.batch_size], dtype=tf.int32), self.decoder_targets], 0)
+        self.decoder_labels = tf.concat([self.decoder_targets, tf.zeros(shape=[1, self.batch_size], dtype=tf.int32)], 0)
 
         used = tf.sign(tf.abs(self.encoder_inputs))
         length = tf.reduce_sum(used, reduction_indices=0)
@@ -95,7 +98,6 @@ class DynamicSeq2seq():
         length = tf.reduce_sum(used, reduction_indices=0)
         self.decoder_targets_length = tf.cast(length, tf.int32)
 
-        self.batch_size = tf.shape(self.encoder_inputs)[1]
 
     def _init_embeddings(self):
         with tf.variable_scope("embedding") as scope:
@@ -122,7 +124,7 @@ class DynamicSeq2seq():
                 )
             self.embedding_decoder = embedding_decoder
             self.decoder_emb_inp = tf.nn.embedding_lookup(
-                    embedding_decoder, self.decoder_targets
+                    embedding_decoder, self.decoder_inputs
                 )
             
     def _init_bidirectional_encoder(self):
@@ -155,7 +157,7 @@ class DynamicSeq2seq():
         # Helper    
         helper = tf.contrib.seq2seq.TrainingHelper(
             self.decoder_emb_inp, 
-            self.decoder_targets_length, 
+            self.decoder_targets_length+1, 
             time_major=True
         )
         projection_layer = tf.layers.Dense(self.decoder_vocab_size, use_bias=False)
@@ -197,7 +199,7 @@ class DynamicSeq2seq():
     def _init_optimizer(self):
         # 整理输出并计算loss
         crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[0][0],
-                        labels=self.decoder_targets)
+                        labels=self.decoder_labels)
         train_loss = tf.reduce_sum(crossent)
         self.loss = train_loss
         # Calculate and clip gradients
