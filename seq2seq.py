@@ -82,6 +82,7 @@ class Seq2seq():
             print(ckpt.model_checkpoint_path)
             self.model.saver.restore(self.sess, ckpt.model_checkpoint_path)
         else:
+            self.sess.run(tf.global_variables_initializer())
             print("没找到模型")
 
     def get_fd(self, batch, model):
@@ -94,7 +95,6 @@ class Seq2seq():
         '''
         encoder_inputs = batch[0]
         decoder_targets = batch[1]
-
         feed_dict = {
             model.encoder_inputs:encoder_inputs,
             model.decoder_targets:decoder_targets
@@ -116,7 +116,7 @@ class Seq2seq():
                 batch_index += 1
                 # 获取fd [time_steps, batch_size]
                 fd = self.get_fd(batch, self.model)
-                _, loss,logits = self.sess.run([self.model.train_op, 
+                _, loss, logits = self.sess.run([self.model.train_op, 
                                     self.model.loss,
                                     self.model.logits], fd)
                 loss_track.append(loss)
@@ -136,17 +136,16 @@ class Seq2seq():
         return feed_dict
 
     def predict(self, input_str):
-        print "me > ", input_str
+        # print "Me > ", input_str
         segments = jieba.lcut(input_str)
         vec = [self.char_to_vec.get(seg, 3) for seg in segments]
         feed = self.make_inference_fd(vec)
         logits = self.sess.run([self.model.translations], feed_dict=feed)
         output = logits[0][0].tolist()
         output_str = "".join([self.vec_to_char.get(i, "_UN_") for i in output])
-
         # check action
         final_output = self.format_output(output_str, input_str)
-        print "AI > ", final_output
+        # print "AI > ", final_output
         return final_output
 
     @check_action
@@ -161,11 +160,10 @@ if __name__ == '__main__':
     seq = Seq2seq()
     if sys.argv[1]:
         if sys.argv[1] == 'retrain':
-            seq.clearModel(0)
             seq.train()
         elif sys.argv[1] == 'train':
             seq.train()
         elif sys.argv[1] == 'infer':
-            seq.predict("天气")  
+            seq.predict("接龍一定會輸給我")  
         elif sys.argv[1] == 'preprocess':
             seq.preprocess()

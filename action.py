@@ -19,8 +19,7 @@ def check_action(func):
     def wrapper(*args, **kwargs):
         for i in actions.keys():
             if i in args[1]:
-                func = actions.get(i)
-                break
+                return actions.get(i)(*args, **kwargs)
         return func(*args, **kwargs)
     return wrapper
 
