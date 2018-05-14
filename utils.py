@@ -1,6 +1,10 @@
 # -*- coding:utf-8 -*-
+import os
 import random
+
 import numpy as np
+
+
 class BatchManager:
     def __init__(self, Q, A, batch_size):
         self.Q = Q
@@ -44,10 +48,27 @@ class BatchManager:
             new_vec = vec + [0] * (A_max_len-len(vec))
             new_A.append(new_vec)
 
-        Q = np.array(new_Q).T
-        A = np.array(new_A).T
+        Q = np.array(new_Q)
+        A = np.array(new_A)
         return [Q,A]
 
     def batch(self):
         for i in self.batch_data:
             yield i
+
+
+def clear():
+    comfire = raw_input("确认要删除模型重新训练吗？（y/n）: ")
+    if comfire in "yY":
+        files_under_dir = os.listdir("model")
+        for file in files_under_dir:
+            try:
+                os.remove(os.path.join("model", file))
+            except:
+                continue
+        
+        for file in ["A_vocab", "Q_vocab", "map.pkl"]:
+            try:
+                os.remove(os.path.join("data", file))
+            except:
+                continue

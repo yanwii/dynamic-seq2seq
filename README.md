@@ -4,6 +4,11 @@
 
 ---
 
+### Update:
+- 修复loss计算bug
+- 修复batch_size大一1时的计算bug
+
+
 ### Requirements
 - tensorflow-1.4+
 - python2.7 (暂时未对python3 兼容)
@@ -24,13 +29,19 @@ tensorflow推出了dynamic_rnn替代了原来的bucket，本项目就是基于dy
 ---
 
 ### 用法:
+    
+    # 新增小黄鸡语料
+    # 添加
+    python prepare_dialog.py 5000
+
+
     seq = Seq2seq()
-    # 预处理
-    seq.preprocess()
     # 训练
     seq.train()
     # 预测
     seq.predict("天气")
+    # 重新训练
+    seq.retrain()
    
 
 ### 效果:

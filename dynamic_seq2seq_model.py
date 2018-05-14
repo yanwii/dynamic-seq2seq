@@ -22,7 +22,7 @@ class DynamicSeq2seq():
         attention               decoder的结构
                                 True:  使用attention模型
                                 False: 一般seq2seq模型
-        time_major              控制输入数据格式
+                      控制输入数据格式
                                 True:  [time_steps, batch_size]
                                 False: [batch_size, time_steps]
 
@@ -32,8 +32,8 @@ class DynamicSeq2seq():
     EOS = 2
     UNK = 3
     def __init__(self, 
-                encoder_cell=tf.contrib.rnn.BasicLSTMCell(10), 
-                decoder_cell=tf.contrib.rnn.BasicLSTMCell(10), 
+                encoder_cell=tf.contrib.rnn.BasicLSTMCell(40), 
+                decoder_cell=tf.contrib.rnn.BasicLSTMCell(40), 
                 encoder_vocab_size=10,
                 decoder_vocab_size=5, 
                 embedding_size=10,
@@ -43,7 +43,7 @@ class DynamicSeq2seq():
         
         self.debug = debug
         self.attention = attention
-        self.lstm_dims = 10
+        self.lstm_dims = 40
 
         self.encoder_vocab_size = encoder_vocab_size
         self.decoder_vocab_size = decoder_vocab_size
@@ -86,16 +86,16 @@ class DynamicSeq2seq():
             dtype=tf.int32,
             name='decoder_targets'
         )
-        self.batch_size = tf.shape(self.encoder_inputs)[1]
-        self.decoder_inputs = tf.concat([tf.ones(shape=[1, self.batch_size], dtype=tf.int32), self.decoder_targets], 0)
-        self.decoder_labels = tf.concat([self.decoder_targets, tf.zeros(shape=[1, self.batch_size], dtype=tf.int32)], 0)
+        self.batch_size = tf.shape(self.encoder_inputs)[0]
+        self.decoder_inputs = tf.concat([tf.ones(shape=[self.batch_size, 1], dtype=tf.int32), self.decoder_targets], 1)
+        self.decoder_labels = tf.concat([self.decoder_targets, tf.zeros(shape=[self.batch_size, 1], dtype=tf.int32)], 1)
 
         used = tf.sign(tf.abs(self.encoder_inputs))
-        length = tf.reduce_sum(used, reduction_indices=0)
+        length = tf.reduce_sum(used, reduction_indices=1)
         self.encoder_inputs_length = tf.cast(length, tf.int32)
 
-        used = tf.sign(tf.abs(self.decoder_targets))
-        length = tf.reduce_sum(used, reduction_indices=0)
+        used = tf.sign(tf.abs(self.decoder_labels))
+        length = tf.reduce_sum(used, reduction_indices=1)
         self.decoder_targets_length = tf.cast(length, tf.int32)
 
 
@@ -136,14 +136,15 @@ class DynamicSeq2seq():
 
         encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
             encoder_cell, self.encoder_emb_inp,
-            sequence_length=self.encoder_inputs_length, time_major=True,
+            sequence_length=self.encoder_inputs_length, time_major=False,
             dtype=tf.float32
         )
         self.encoder_output = encoder_outputs
         self.encoder_state = encoder_state
 
     def _init_decoder(self):
-        attention_states = tf.transpose(self.encoder_output, [1, 0, 2])
+        # attention_states = tf.transpose(self.encoder_output, [1, 0, 2])
+        attention_states = self.encoder_output
 
         attention_mechanism = tf.contrib.seq2seq.LuongAttention(
             num_units=self.lstm_dims, 
@@ -158,7 +159,7 @@ class DynamicSeq2seq():
         helper = tf.contrib.seq2seq.TrainingHelper(
             self.decoder_emb_inp, 
             self.decoder_targets_length+1, 
-            time_major=True
+            time_major=False
         )
         projection_layer = tf.layers.Dense(self.decoder_vocab_size, use_bias=False)
         init_state = decoder_cell.zero_state(self.batch_size, tf.float32).clone(cell_state=self.encoder_state)
@@ -169,7 +170,7 @@ class DynamicSeq2seq():
             initial_state=init_state,
             output_layer=projection_layer
         )
-        maximum_iterations = tf.round(tf.reduce_max(self.encoder_inputs_length) * 10)
+        maximum_iterations = tf.round(tf.reduce_max(self.encoder_inputs_length) * 20)
         # Dynamic decoding
         outputs = tf.contrib.seq2seq.dynamic_decode(
             decoder, 
@@ -198,18 +199,24 @@ class DynamicSeq2seq():
 
     def _init_optimizer(self):
         # 整理输出并计算loss
-        crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[0][0],
-                        labels=self.decoder_labels)
-        train_loss = tf.reduce_sum(crossent)
-        self.loss = train_loss
+        mask = tf.sequence_mask(
+            tf.to_float(self.decoder_targets_length),
+            tf.to_float(tf.shape(self.decoder_labels)[1])    
+        )
+        self.loss = tf.contrib.seq2seq.sequence_loss(
+            self.logits[0][0],
+            self.decoder_labels,
+            tf.to_float(mask)
+        )
+
         # Calculate and clip gradients
         params = tf.trainable_variables()
-        gradients = tf.gradients(train_loss, params)
+        gradients = tf.gradients(self.loss, params)
         clipped_gradients, _ = tf.clip_by_global_norm(
                         gradients, self.max_gradient_norm)
 
         # Optimization
-        optimizer = tf.train.GradientDescentOptimizer(0.02)
+        optimizer = tf.train.GradientDescentOptimizer(0.1)
         update_step = optimizer.apply_gradients(zip(clipped_gradients, params))
         self.train_op = update_step
         self.saver = tf.train.Saver(tf.global_variables())

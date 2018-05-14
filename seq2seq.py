@@ -12,8 +12,7 @@ import tensorflow as tf
 from action import check_action
 from dynamic_seq2seq_model import DynamicSeq2seq
 from preprocess import Preprocess
-from utils import BatchManager
-
+from utils import BatchManager, clear
 
 class Seq2seq():
     '''
@@ -37,7 +36,7 @@ class Seq2seq():
         self.dict_file = 'data/word_dict.txt'
         self.data_map = "data/map.pkl"
 
-        self.batch_size = 1
+        self.batch_size = 20
         self.max_epoch = 100000
         self.show_batch = 1
         self.model_path = 'model/'
@@ -116,9 +115,10 @@ class Seq2seq():
                 batch_index += 1
                 # 获取fd [time_steps, batch_size]
                 fd = self.get_fd(batch, self.model)
-                _, loss, logits = self.sess.run([self.model.train_op, 
+                _, loss, logits, labels = self.sess.run([self.model.train_op, 
                                     self.model.loss,
-                                    self.model.logits], fd)
+                                    self.model.logits,
+                                    self.model.decoder_labels], fd)
                 loss_track.append(loss)
                 if batch_index % self.show_batch == 0:
                     print "\tstep: {}/{}".format(batch_index, nums_batch)
@@ -129,7 +129,7 @@ class Seq2seq():
                 self.model.saver.save(self.sess, checkpoint_path, global_step=self.model.global_step)
         
     def make_inference_fd(self, vec):
-        tensor = np.array([vec]).T
+        tensor = np.array([vec])
         feed_dict = {
             self.model.encoder_inputs:tensor
         }
@@ -157,13 +157,12 @@ class Seq2seq():
         p.main()
 
 if __name__ == '__main__':
-    seq = Seq2seq()
     if sys.argv[1]:
         if sys.argv[1] == 'retrain':
-            seq.train()
-        elif sys.argv[1] == 'train':
+            clear()
+            sys.argv[1] = "train"
+        seq = Seq2seq()
+        if sys.argv[1] == 'train':
             seq.train()
         elif sys.argv[1] == 'infer':
-            seq.predict("接龍一定會輸給我")  
-        elif sys.argv[1] == 'preprocess':
-            seq.preprocess()
+            print seq.predict("呵呵")  
