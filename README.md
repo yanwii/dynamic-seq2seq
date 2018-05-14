@@ -6,7 +6,7 @@
 
 ### Update:
 - 修复loss计算bug
-- 修复batch_size大一1时的计算bug
+- 修复batch_size大于1时的计算bug
 
 
 ### Requirements
